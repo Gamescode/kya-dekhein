@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ContentItem, WatchProviders } from "./catalogue";
 
-const timeOptions = ["10 min", "20 min", "30 min", "45 min", "60+ min"];
+const timeOptions = ["60 min", "90 min", "120 min", "180 min"];
 
 const moods = [
   "😂 Fun",
@@ -28,7 +28,6 @@ type TmdbListMovie = {
 };
 
 function getMinutes(time: string) {
-  if (time === "60+ min") return 60;
   return Number.parseInt(time, 10);
 }
 
@@ -84,50 +83,42 @@ function getRecommendations(
   mood: string,
   language: string
 ): ContentItem[] {
-  const availableMinutes = getMinutes(time);
+  const minimumMinutes = getMinutes(time);
   const selectedMood = getMoodName(mood);
 
-  const scored = items.map((item) => {
-    let score = 0;
+  const maximumMinutes =
+    minimumMinutes === 60
+      ? 90
+      : minimumMinutes === 90
+        ? 120
+        : minimumMinutes === 120
+          ? 180
+          : Infinity;
 
-    // TIME
-    if (item.runtime <= availableMinutes) {
-      score += 35;
+  const scored = items
+    .filter(
+      (item) =>
+        item.runtime >= minimumMinutes &&
+        item.runtime < maximumMinutes
+    )
+    .map((item) => {
+      let score = 0;
 
-      const unusedTime = availableMinutes - item.runtime;
+      // MOOD
+      if (item.moods.includes(selectedMood)) {
+        score += 25;
+      }
 
-      if (unusedTime <= 5) {
+      // LANGUAGE
+      if (language === "Any" || item.language === language) {
         score += 10;
-      } else if (unusedTime <= 15) {
-        score += 5;
       }
-    } else {
-      const overBy = item.runtime - availableMinutes;
 
-      if (overBy <= 10) {
-        score += 15;
-      } else if (overBy <= 20) {
-        score += 5;
-      } else {
-        score -= 20;
-      }
-    }
+      // QUALITY
+      score += item.rating;
 
-    // MOOD
-    if (item.moods.includes(selectedMood)) {
-      score += 25;
-    }
-
-    // LANGUAGE
-    if (language === "Any" || item.language === language) {
-      score += 10;
-    }
-
-    // QUALITY
-    score += item.rating;
-
-    return { item, score };
-  });
+      return { item, score };
+    });
 
   scored.sort((a, b) => b.score - a.score);
   return scored.map((result) => result.item);
@@ -146,96 +137,119 @@ export default function Home() {
 
   const recommendation = recommendations[currentRecommendation];
 
-  async function handleRecommend() {
-    setLoading(true);
-    setError("");
-    setRecommendations([]);
-    setCurrentRecommendation(0);
+  
+async function handleRecommend() {
+  setLoading(true);
+  setError("");
+  setRecommendations([]);
+  setCurrentRecommendation(0);
 
-    try {
-      const selectedMood = getMoodName(mood);
+  try {
+    const selectedMood = getMoodName(mood);
 
-      // Horror uses TMDB's Horror genre filter (genre ID 27).
-      const listUrl =
-        selectedMood === "Horror" ? "/api/tmdb?genre=27" : "/api/tmdb";
+    // Build the movie-list request using the selected language and mood.
+    const params = new URLSearchParams();
 
-      const listResponse = await fetch(listUrl);
-
-      if (!listResponse.ok) {
-        throw new Error("Could not load movies from TMDB.");
-      }
-
-      const listData: { movies: TmdbListMovie[] } = await listResponse.json();
-
-      if (!listData.movies?.length) {
-        throw new Error("TMDB did not return any movies.");
-      }
-
-      const detailedMovies: ContentItem[] = [];
-
-      // Fetch details sequentially to avoid many simultaneous requests.
-      for (const listedMovie of listData.movies) {
-        const detailsResponse = await fetch(
-          `/api/tmdb?id=${listedMovie.id}`
-        );
-
-        if (!detailsResponse.ok) {
-          continue;
-        }
-
-        const details = await detailsResponse.json();
-
-        if (!details.runtime || details.runtime <= 0) {
-          continue;
-        }
-
-        const genreIds = (details.genres ?? []).map(
-          (genre: { id: number }) => genre.id
-        );
-
-        detailedMovies.push({
-          id: details.id,
-          title: details.title,
-          type: "movie",
-          runtime: details.runtime,
-          language: mapLanguage(details.language),
-          moods: inferMoods(genreIds),
-          rating: details.rating ?? 0,
-          isFree: false,
-          url: `https://www.themoviedb.org/movie/${details.id}`,
-          description: details.description,
-          releaseDate: details.releaseDate,
-          genreIds,
-          posterPath: details.posterPath ?? listedMovie.posterPath ?? null,
-          watchProviders:
-            (details.watchProviders as WatchProviders | null) ?? null,
-        });
-      }
-
-      if (detailedMovies.length === 0) {
-        throw new Error("Could not get movie runtimes. Please try again.");
-      }
-
-      // Free-first ranking is not applied yet.
-      // Provider data is now available for the next integration step.
-      const results = getRecommendations(
-        detailedMovies,
-        time,
-        mood,
-        language
-      );
-
-      setRecommendations(results);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Something went wrong while loading recommendations."
-      );
-    } finally {
-      setLoading(false);
+    if (language === "Hindi") {
+      params.set("language", "hi");
+    } else if (language === "English") {
+      params.set("language", "en");
     }
+
+    if (selectedMood === "Horror") {
+      params.set("genre", "27");
+    }
+
+    const query = params.toString();
+    const listUrl = query ? `/api/tmdb?${query}` : "/api/tmdb";
+
+    const listResponse = await fetch(listUrl);
+
+    if (!listResponse.ok) {
+      throw new Error("We couldn't load movies right now. Please try again.");
+    }
+
+    const listData: { movies: TmdbListMovie[] } =
+      await listResponse.json();
+
+    if (!listData.movies?.length) {
+      throw new Error("TMDB did not return any movies for these choices.");
+    }
+
+    const detailedMovies: ContentItem[] = [];
+
+    // Fetch movie details sequentially.
+    for (const listedMovie of listData.movies) {
+      const detailsResponse = await fetch(
+        `/api/tmdb?id=${listedMovie.id}`
+      );
+
+      if (!detailsResponse.ok) {
+        continue;
+      }
+
+      const details = await detailsResponse.json();
+
+      if (!details.runtime || details.runtime <= 0) {
+        continue;
+      }
+
+      const genreIds = (details.genres ?? []).map(
+        (genre: { id: number }) => genre.id
+      );
+
+      detailedMovies.push({
+        id: details.id,
+        title: details.title,
+        type: "movie",
+        runtime: details.runtime,
+        language: mapLanguage(details.language),
+        moods: inferMoods(genreIds),
+        rating: details.rating ?? 0,
+        isFree: false,
+        url: `https://www.themoviedb.org/movie/${details.id}`,
+        description: details.description,
+        releaseDate: details.releaseDate,
+        genreIds,
+        posterPath: details.posterPath ?? listedMovie.posterPath ?? null,
+        watchProviders:
+          (details.watchProviders as WatchProviders | null) ?? null,
+      });
+    }
+
+    // Strictly filter by the selected language before ranking.
+    const languageFilteredMovies =
+      language === "Hindi"
+        ? detailedMovies.filter((movie) => movie.language === "Hindi")
+        : language === "English"
+          ? detailedMovies.filter((movie) => movie.language === "English")
+          : detailedMovies;
+
+    if (languageFilteredMovies.length === 0) {
+      throw new Error(
+        `No ${language} movies found for these choices. Try another mood or time.`
+      );
+    }
+
+    // Free-first ranking is not applied yet.
+    const results = getRecommendations(
+      languageFilteredMovies,
+      time,
+      mood,
+      language
+    );
+
+    setRecommendations(results);
+  } catch (err) {
+    setError(
+      err instanceof Error
+        ? err.message
+        : "Something went wrong while loading recommendations."
+    );
+  } finally {
+    setLoading(false);
   }
+}
 
   function handleAnother() {
     if (recommendations.length === 0) return;
