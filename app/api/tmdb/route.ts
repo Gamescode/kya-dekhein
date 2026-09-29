@@ -1,5 +1,38 @@
-
 import { NextResponse } from "next/server";
+
+const sleep = (ms: number) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+async function fetchWithRetry(
+  url: string,
+  retries = 2,
+  delay = 500
+): Promise<Response> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        cache: "no-store",
+      });
+
+      return response;
+    } catch (error) {
+      lastError = error;
+
+      console.warn(
+        `TMDB request failed (attempt ${attempt + 1}/${retries + 1}):`,
+        error
+      );
+
+      if (attempt < retries) {
+        await sleep(delay);
+      }
+    }
+  }
+
+  throw lastError;
+}
 
 export async function GET(request: Request) {
   const apiKey = process.env.TMDB_API_KEY;
@@ -17,13 +50,15 @@ export async function GET(request: Request) {
   const language = searchParams.get("language");
 
   try {
-    // If an ID is provided, return details for one movie.
+    // ------------------------------------------------------------
+    // MOVIE DETAILS
+    // ------------------------------------------------------------
     if (movieId) {
-      const response = await fetch(
-        `https://api.themoviedb.org/3/movie/${encodeURIComponent(
-          movieId
-        )}?api_key=${apiKey}&language=en-IN`
-      );
+      const movieEndpoint = `https://api.themoviedb.org/3/movie/${encodeURIComponent(
+        movieId
+      )}?api_key=${apiKey}&language=en-IN`;
+
+      const response = await fetchWithRetry(movieEndpoint);
 
       if (!response.ok) {
         return NextResponse.json(
@@ -35,17 +70,26 @@ export async function GET(request: Request) {
       const movie = await response.json();
 
       // Get watch-provider information for India.
-      const providersResponse = await fetch(
-        `https://api.themoviedb.org/3/movie/${encodeURIComponent(
-          movieId
-        )}/watch/providers?api_key=${apiKey}`
-      );
+      const providersEndpoint = `https://api.themoviedb.org/3/movie/${encodeURIComponent(
+        movieId
+      )}/watch/providers?api_key=${apiKey}`;
 
       let indiaProviders = null;
 
-      if (providersResponse.ok) {
-        const providersData = await providersResponse.json();
-        indiaProviders = providersData.results?.IN ?? null;
+      try {
+        const providersResponse = await fetchWithRetry(providersEndpoint);
+
+        if (providersResponse.ok) {
+          const providersData = await providersResponse.json();
+          indiaProviders = providersData.results?.IN ?? null;
+        }
+      } catch (error) {
+        // Watch-provider information is optional.
+        // Don't fail the whole movie request if this call fails.
+        console.warn(
+          `TMDB watch providers request failed for movie ${movieId}:`,
+          error
+        );
       }
 
       return NextResponse.json({
@@ -61,7 +105,10 @@ export async function GET(request: Request) {
       });
     }
 
-    // Build a discover request when a language or genre is selected.
+    // ------------------------------------------------------------
+    // MOVIE LIST
+    // ------------------------------------------------------------
+
     const params = new URLSearchParams({
       api_key: apiKey,
       language: "en-IN",
@@ -78,41 +125,26 @@ export async function GET(request: Request) {
       params.set("with_genres", genre);
     }
 
-    // Keep the existing popular-movies endpoint for the unfiltered "Any" case.
+    // Use discover when filtering by language or genre.
+    // Use popular for the unfiltered "Any" case.
     const endpoint =
       language || genre
         ? `https://api.themoviedb.org/3/discover/movie?${params.toString()}`
         : `https://api.themoviedb.org/3/movie/popular?api_key=${apiKey}&language=en-IN&region=IN&page=1`;
 
-    let response: Response;
-
-try {
-  response = await fetch(endpoint);
-} catch (firstError) {
-  console.warn("TMDB request failed. Retrying once...", firstError);
-
-  await new Promise((resolve) => setTimeout(resolve, 500));
-
-  try {
-    response = await fetch(endpoint);
-  } catch (secondError) {
-    console.error("TMDB request failed after retry:", secondError);
-
-    return NextResponse.json(
-      {
-        error: "TMDB is temporarily unavailable. Please try again.",
-      },
-      { status: 503 }
+    console.log(
+      "TMDB endpoint:",
+      endpoint.replace(apiKey, "HIDDEN")
     );
-  }
-}
 
-if (!response.ok) {
-  return NextResponse.json(
-    { error: "TMDB movie list request failed" },
-    { status: response.status }
-  );
-}
+    const response = await fetchWithRetry(endpoint);
+
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: "TMDB movie list request failed" },
+        { status: response.status }
+      );
+    }
 
     const data = await response.json();
 

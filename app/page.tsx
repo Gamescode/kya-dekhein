@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ContentItem, WatchProviders } from "./catalogue";
 
 const timeOptions = ["60 min", "90 min", "120 min", "180 min"];
@@ -16,65 +16,56 @@ const moods = [
 
 const languages = ["Hindi", "English", "Any"];
 
-type TmdbListMovie = {
-  id: number;
-  title: string;
-  description: string;
-  rating: number;
-  language: string;
-  releaseDate: string;
-  genreIds: number[];
-  posterPath: string | null;
-};
-
 function getMinutes(time: string) {
   return Number.parseInt(time, 10);
 }
 
 function getMoodName(mood: string) {
-  return mood.slice(mood.indexOf(" ") + 1);
+  return mood.replace(/^[^\w]+ /, "").trim();
 }
 
-function mapLanguage(language: string): ContentItem["language"] {
-  if (language === "hi") return "Hindi";
-  if (language === "en") return "English";
+function mapLanguage(languageCode: string) {
+  if (languageCode === "hi") return "Hindi";
+  if (languageCode === "en") return "English";
   return "Any";
 }
 
-function inferMoods(genreIds: number[]): string[] {
-  const inferredMoods: string[] = [];
+function inferMoods(genreIds: number[]) {
+  const result: string[] = [];
 
-  // TMDB genre IDs
-  const isHorror = genreIds.includes(27);
-  const isThrilling = [28, 12, 53, 9648].some((id) =>
-    genreIds.includes(id)
-  );
-
-  if (isHorror) {
-    inferredMoods.push("Horror");
+  if (genreIds.includes(35) || genreIds.includes(10751)) {
+    result.push("Fun");
   }
 
-  if (isThrilling) {
-    inferredMoods.push("Thrilling");
+  if (genreIds.includes(18) || genreIds.includes(36)) {
+    result.push("Interesting");
   }
 
-  if ([35, 16].some((id) => genreIds.includes(id))) {
-    inferredMoods.push("Fun");
+  if (genreIds.includes(28) || genreIds.includes(53)) {
+    result.push("Thrilling");
   }
 
-  if ([99, 36, 878].some((id) => genreIds.includes(id))) {
-    inferredMoods.push("Interesting");
+  if (genreIds.includes(27)) {
+    result.push("Horror");
   }
 
-  if ([10751, 10749].some((id) => genreIds.includes(id))) {
-    inferredMoods.push("Feel-good");
+  if (
+    genreIds.includes(10749) ||
+    genreIds.includes(10751) ||
+    genreIds.includes(35)
+  ) {
+    result.push("Feel-good");
   }
 
-  if (inferredMoods.length === 0) {
-    inferredMoods.push("Chill");
+  if (
+    genreIds.includes(99) ||
+    genreIds.includes(10402) ||
+    genreIds.includes(16)
+  ) {
+    result.push("Chill");
   }
 
-  return inferredMoods;
+  return result;
 }
 
 function getRecommendations(
@@ -104,23 +95,21 @@ function getRecommendations(
     .map((item) => {
       let score = 0;
 
-      // MOOD
       if (item.moods.includes(selectedMood)) {
         score += 25;
       }
 
-      // LANGUAGE
       if (language === "Any" || item.language === language) {
         score += 10;
       }
 
-      // QUALITY
       score += item.rating;
 
       return { item, score };
     });
 
   scored.sort((a, b) => b.score - a.score);
+
   return scored.map((result) => result.item);
 }
 
@@ -128,165 +117,204 @@ export default function Home() {
   const [time, setTime] = useState("");
   const [mood, setMood] = useState("");
   const [language, setLanguage] = useState("");
-  const [freeFirst, setFreeFirst] = useState(true);
+
+  // Free First is currently disabled because it has not been implemented yet.
+  // const [freeFirst, setFreeFirst] = useState(true);
 
   const [recommendations, setRecommendations] = useState<ContentItem[]>([]);
   const [currentRecommendation, setCurrentRecommendation] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [hasRecommended, setHasRecommended] = useState(false);
 
-  const recommendation = recommendations[currentRecommendation];
-
-  
-async function handleRecommend() {
-  setLoading(true);
-  setError("");
-  setRecommendations([]);
-  setCurrentRecommendation(0);
-
-  try {
-    const selectedMood = getMoodName(mood);
-
-    // Build the movie-list request using the selected language and mood.
-    const params = new URLSearchParams();
-
-    if (language === "Hindi") {
-      params.set("language", "hi");
-    } else if (language === "English") {
-      params.set("language", "en");
-    }
-
-    if (selectedMood === "Horror") {
-      params.set("genre", "27");
-    }
-
-    const query = params.toString();
-    const listUrl = query ? `/api/tmdb?${query}` : "/api/tmdb";
-
-    const listResponse = await fetch(listUrl);
-
-    if (!listResponse.ok) {
-      throw new Error("We couldn't load movies right now. Please try again.");
-    }
-
-    const listData: { movies: TmdbListMovie[] } =
-      await listResponse.json();
-
-    if (!listData.movies?.length) {
-      throw new Error("TMDB did not return any movies for these choices.");
-    }
-
-    const detailedMovies: ContentItem[] = [];
-
-    // Fetch movie details sequentially.
-    for (const listedMovie of listData.movies) {
-      const detailsResponse = await fetch(
-        `/api/tmdb?id=${listedMovie.id}`
-      );
-
-      if (!detailsResponse.ok) {
-        continue;
-      }
-
-      const details = await detailsResponse.json();
-
-      if (!details.runtime || details.runtime <= 0) {
-        continue;
-      }
-
-      const genreIds = (details.genres ?? []).map(
-        (genre: { id: number }) => genre.id
-      );
-
-      detailedMovies.push({
-        id: details.id,
-        title: details.title,
-        type: "movie",
-        runtime: details.runtime,
-        language: mapLanguage(details.language),
-        moods: inferMoods(genreIds),
-        rating: details.rating ?? 0,
-        isFree: false,
-        url: `https://www.themoviedb.org/movie/${details.id}`,
-        description: details.description,
-        releaseDate: details.releaseDate,
-        genreIds,
-        posterPath: details.posterPath ?? listedMovie.posterPath ?? null,
-        watchProviders:
-          (details.watchProviders as WatchProviders | null) ?? null,
+  useEffect(() => {
+    if (recommendations.length > 0) {
+      document.getElementById("recommendation")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
       });
     }
-
-    // Strictly filter by the selected language before ranking.
-    const languageFilteredMovies =
-      language === "Hindi"
-        ? detailedMovies.filter((movie) => movie.language === "Hindi")
-        : language === "English"
-          ? detailedMovies.filter((movie) => movie.language === "English")
-          : detailedMovies;
-
-    if (languageFilteredMovies.length === 0) {
-      throw new Error(
-        `No ${language} movies found for these choices. Try another mood or time.`
-      );
-    }
-
-    // Free-first ranking is not applied yet.
-    const results = getRecommendations(
-      languageFilteredMovies,
-      time,
-      mood,
-      language
-    );
-
-    setRecommendations(results);
-  } catch (err) {
-    setError(
-      err instanceof Error
-        ? err.message
-        : "Something went wrong while loading recommendations."
-    );
-  } finally {
-    setLoading(false);
-  }
-}
-
-  function handleAnother() {
-    if (recommendations.length === 0) return;
-
-    setCurrentRecommendation((current) => {
-      return (current + 1) % recommendations.length;
-    });
-  }
+  }, [recommendations]);
 
   const canRecommend = Boolean(time && mood && language);
 
+  async function handleRecommend() {
+    setLoading(true);
+    setError("");
+    setRecommendations([]);
+    setCurrentRecommendation(0);
+    setHasRecommended(true);
+
+    try {
+      const params = new URLSearchParams();
+
+      if (language === "Hindi") {
+        params.set("language", "hi");
+      } else if (language === "English") {
+        params.set("language", "en");
+      }
+
+      if (getMoodName(mood) === "Horror") {
+        params.set("genre", "27");
+      }
+
+      const response = await fetch(`/api/tmdb?${params.toString()}`);
+
+      if (!response.ok) {
+        throw new Error("Failed to load movies");
+      }
+
+      const data = await response.json();
+
+      // /api/tmdb returns { count, movies }
+      const movies = data.movies;
+
+      if (!Array.isArray(movies)) {
+        throw new Error("Invalid movie data");
+      }
+
+      const detailedItems: ContentItem[] = [];
+
+      for (const movie of movies) {
+        try {
+          const detailsResponse = await fetch(
+            `/api/tmdb?id=${movie.id}`
+          );
+
+          if (!detailsResponse.ok) {
+            continue;
+          }
+
+          const details = await detailsResponse.json();
+
+          if (!details.runtime) {
+            continue;
+          }
+
+          // The list API returns genreIds.
+          // The details API returns genres: [{ id, name }, ...].
+          const genreIds =
+            movie.genreIds ||
+            details.genres?.map(
+              (genre: { id: number }) => genre.id
+            ) ||
+            [];
+
+          // The details API returns "language".
+          const itemLanguage = mapLanguage(
+            details.language || movie.language
+          );
+
+          // Keep language filtering strict when a specific
+          // language is selected.
+          if (
+            language !== "Any" &&
+            itemLanguage !== language
+          ) {
+            continue;
+          }
+
+          const watchProviders: WatchProviders =
+            details.watchProviders || {
+              flatrate: [],
+              free: [],
+              ads: [],
+              rent: [],
+              buy: [],
+            };
+
+          detailedItems.push({
+            id: details.id || movie.id,
+            title: details.title || movie.title,
+            type: "movie",
+            runtime: details.runtime,
+            language: itemLanguage,
+            moods: inferMoods(genreIds),
+            rating: details.rating ?? movie.rating ?? 0,
+            url: `https://www.themoviedb.org/movie/${
+              details.id || movie.id
+            }`,
+            description:
+              details.description ||
+              movie.description ||
+              "No description available.",
+            releaseDate:
+              details.releaseDate ||
+              movie.releaseDate ||
+              "",
+            genreIds,
+            posterPath:
+              details.posterPath ||
+              movie.posterPath ||
+              null,
+            watchProviders,
+            isFree: false,
+          });
+        } catch {
+          // Skip individual movies if their details fail to load.
+        }
+      }
+
+      const results = getRecommendations(
+        detailedItems,
+        time,
+        mood,
+        language
+      );
+
+      setRecommendations(results);
+    } catch {
+      setError(
+        "We couldn't load movies right now. Please try again."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const currentMovie =
+    recommendations[currentRecommendation];
+
+  function handleAnother() {
+    if (recommendations.length <= 1) {
+      return;
+    }
+
+    setCurrentRecommendation((current) =>
+      current + 1 >= recommendations.length ? 0 : current + 1
+    );
+  }
+
   return (
-    <main className="min-h-screen bg-white px-6 py-10 text-gray-900">
-      <div className="mx-auto max-w-2xl">
+    <main className="min-h-screen bg-white text-gray-900">
+      <div className="mx-auto max-w-4xl px-6 py-12">
         {/* Header */}
-        <div className="mb-10 text-center">
-          <h1 className="text-4xl font-bold tracking-tight">Kya Dekhein?</h1>
-          <p className="mt-3 text-lg text-gray-600">
+        <header className="mb-12 text-center">
+          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
+            Kya Dekhein?
+          </h1>
+
+          <p className="mt-4 text-lg text-gray-600">
             Don&apos;t browse. Just watch.
           </p>
-        </div>
+        </header>
 
         {/* Time */}
         <section className="mb-8">
-          <h2 className="mb-3 text-xl font-semibold">
+          <h2 className="mb-4 text-xl font-semibold">
             How much time do you have?
           </h2>
 
-          <div className="flex flex-wrap gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {timeOptions.map((option) => (
               <button
                 key={option}
+                type="button"
                 onClick={() => setTime(option)}
-                className={`rounded-xl border px-5 py-3 font-medium transition ${
+                className={`rounded-2xl border px-4 py-4 text-sm font-medium transition ${
                   time === option
                     ? "border-black bg-black text-white"
-                    : "border-gray-300 bg-white hover:border-black"
+                    : "border-gray-200 bg-white hover:border-gray-400"
                 }`}
               >
                 {option}
@@ -297,19 +325,20 @@ async function handleRecommend() {
 
         {/* Mood */}
         <section className="mb-8">
-          <h2 className="mb-3 text-xl font-semibold">
+          <h2 className="mb-4 text-xl font-semibold">
             What are you in the mood for?
           </h2>
 
-          <div className="flex flex-wrap gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             {moods.map((option) => (
               <button
                 key={option}
+                type="button"
                 onClick={() => setMood(option)}
-                className={`rounded-xl border px-5 py-3 font-medium transition ${
+                className={`rounded-2xl border px-4 py-4 text-sm font-medium transition ${
                   mood === option
                     ? "border-black bg-black text-white"
-                    : "border-gray-300 bg-white hover:border-black"
+                    : "border-gray-200 bg-white hover:border-gray-400"
                 }`}
               >
                 {option}
@@ -320,17 +349,20 @@ async function handleRecommend() {
 
         {/* Language */}
         <section className="mb-8">
-          <h2 className="mb-3 text-xl font-semibold">Language?</h2>
+          <h2 className="mb-4 text-xl font-semibold">
+            Which language?
+          </h2>
 
-          <div className="flex flex-wrap gap-3">
+          <div className="grid grid-cols-3 gap-3">
             {languages.map((option) => (
               <button
                 key={option}
+                type="button"
                 onClick={() => setLanguage(option)}
-                className={`rounded-xl border px-5 py-3 font-medium transition ${
+                className={`rounded-2xl border px-4 py-4 text-sm font-medium transition ${
                   language === option
                     ? "border-black bg-black text-white"
-                    : "border-gray-300 bg-white hover:border-black"
+                    : "border-gray-200 bg-white hover:border-gray-400"
                 }`}
               >
                 {option}
@@ -339,133 +371,133 @@ async function handleRecommend() {
           </div>
         </section>
 
-        {/* Free first */}
+        {/* Free First */}
+        {/*
         <section className="mb-8">
           <button
+            type="button"
             onClick={() => setFreeFirst(!freeFirst)}
-            className="flex items-center gap-3 text-lg font-medium"
-            aria-pressed={freeFirst}
           >
-            <span
-              className={`flex h-6 w-11 items-center rounded-full p-1 transition ${
-                freeFirst ? "bg-black" : "bg-gray-300"
-              }`}
-            >
-              <span
-                className={`h-4 w-4 rounded-full bg-white transition ${
-                  freeFirst ? "translate-x-5" : "translate-x-0"
-                }`}
-              />
-            </span>
             Free first
           </button>
-
-          <p className="mt-2 text-sm text-gray-500">
-            Provider availability is now fetched for India, but free-first
-            ranking is not applied yet.
-          </p>
         </section>
+        */}
 
         {/* Recommend */}
         <button
-          onClick={handleRecommend}
+          type="button"
           disabled={!canRecommend || loading}
-          className={`w-full rounded-2xl px-6 py-4 text-lg font-bold transition ${
+          onClick={handleRecommend}
+          className={`w-full rounded-2xl px-6 py-4 text-lg font-semibold transition ${
             canRecommend && !loading
               ? "bg-black text-white hover:bg-gray-800"
               : "cursor-not-allowed bg-gray-200 text-gray-400"
           }`}
         >
-          {loading ? "Finding a recommendation..." : "🎲 Kya Dekhein?"}
+          {loading
+            ? "Finding something..."
+            : "What should I watch?"}
         </button>
 
+        {/* Error */}
         {error && (
-          <p className="mt-4 rounded-xl bg-red-50 p-4 text-red-700">
+          <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-center text-sm text-red-700">
             {error}
-          </p>
+          </div>
         )}
 
+        {/* No results */}
+        {hasRecommended &&
+          recommendations.length === 0 &&
+          !loading &&
+          !error && (
+            <div className="mt-10 rounded-3xl border border-gray-200 bg-gray-50 p-6 text-center shadow-sm">
+              <p className="text-lg font-medium text-gray-900">
+                No good matches found.
+              </p>
+
+              <p className="mt-2 text-sm text-gray-600">
+                Try changing your time, mood, or language.
+              </p>
+            </div>
+          )}
+
         {/* Recommendation */}
-        {recommendation && (
-          <div className="mt-10 rounded-3xl border border-gray-200 bg-gray-50 p-6 shadow-sm">
-            <p className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
+        {currentMovie && (
+          <div
+            id="recommendation"
+            className="mt-10 scroll-mt-6 rounded-3xl border border-gray-200 bg-gray-50 p-6 shadow-sm"
+          >
+            <p className="mb-4 text-sm font-medium uppercase tracking-wide text-gray-500">
               We think you should watch
             </p>
 
-            {/* Details and poster: side-by-side on wider screens */}
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-[minmax(0,1fr)_160px]">
-              <div className="min-w-0">
+            <div className="grid gap-6 sm:grid-cols-[180px_1fr]">
+              {currentMovie.posterPath ? (
+                <img
+                  src={`https://image.tmdb.org/t/p/w500${currentMovie.posterPath}`}
+                  alt={currentMovie.title}
+                  className="mx-auto w-full max-w-[180px] rounded-2xl object-cover shadow-sm"
+                />
+              ) : (
+                <div className="flex aspect-[2/3] w-full max-w-[180px] items-center justify-center rounded-2xl bg-gray-200 text-center text-sm text-gray-500">
+                  No poster
+                </div>
+              )}
+
+              <div>
                 <h2 className="text-3xl font-bold">
-                  {recommendation.title}
+                  {currentMovie.title}
                 </h2>
 
-                <div className="mt-4 flex flex-wrap gap-2 text-sm">
-                  <span className="rounded-full bg-white px-3 py-1">
-                    {recommendation.runtime} min
-                  </span>
+                <div className="mt-3 flex flex-wrap gap-2 text-sm text-gray-600">
+                  <span>{currentMovie.runtime} min</span>
+                  <span>•</span>
+                  <span>{currentMovie.language}</span>
 
-                  <span className="rounded-full bg-white px-3 py-1">
-                    {recommendation.language}
-                  </span>
+                  {currentMovie.releaseDate && (
+                    <>
+                      <span>•</span>
+                      <span>
+                        {currentMovie.releaseDate.slice(0, 4)}
+                      </span>
+                    </>
+                  )}
 
-                  <span className="rounded-full bg-white px-3 py-1">
-                    ⭐ {recommendation.rating.toFixed(1)}
+                  <span>•</span>
+
+                  <span>
+                    ⭐ {currentMovie.rating.toFixed(1)}
                   </span>
                 </div>
 
-                {recommendation.description && (
-                  <p className="mt-4 text-gray-600">
-                    {recommendation.description}
+                {currentMovie.description && (
+                  <p className="mt-5 leading-7 text-gray-700">
+                    {currentMovie.description}
                   </p>
                 )}
 
-                <div className="mt-6 rounded-2xl bg-white p-4">
-                  <p className="font-semibold">Why this one?</p>
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                  <a
+                    href={currentMovie.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-2xl bg-black px-5 py-3 text-center text-sm font-semibold text-white transition hover:bg-gray-800"
+                  >
+                    View on TMDB
+                  </a>
 
-                  <p className="mt-2 text-gray-600">
-                    It matches your{" "}
-                    <strong>{getMoodName(mood).toLowerCase()}</strong> mood and
-                    fits your <strong>{time}</strong> time window.
-                    {language !== "Any" && (
-                      <>
-                        {" "}
-                        Its original language is{" "}
-                        <strong>{recommendation.language}</strong>.
-                      </>
-                    )}
-                  </p>
+                  {recommendations.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={handleAnother}
+                      className="rounded-2xl border border-gray-300 bg-white px-5 py-3 text-sm font-semibold text-gray-900 transition hover:border-gray-500"
+                    >
+                      Another
+                    </button>
+                  )}
                 </div>
-
-                <a
-                  href={recommendation.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-6 block w-full rounded-2xl bg-black px-6 py-4 text-center font-bold text-white hover:bg-gray-800"
-                >
-                  ▶ View on TMDB
-                </a>
-
-                <button
-                  onClick={handleAnother}
-                  className="mt-3 w-full rounded-2xl border border-gray-300 bg-white px-6 py-4 font-bold text-gray-900 hover:border-black"
-                >
-                  🎲 Another one
-                </button>
               </div>
-
-              {/* Poster */}
-              {recommendation.posterPath ? (
-                <img
-                  src={`https://image.tmdb.org/t/p/w500${recommendation.posterPath}`}
-                  alt={`Poster for ${recommendation.title}`}
-                  className="mx-auto h-auto w-full max-w-[160px] self-start rounded-xl object-cover"
-                  loading="lazy"
-                />
-              ) : (
-                <div className="flex min-h-56 items-center justify-center rounded-xl bg-white text-sm text-gray-400">
-                  Poster unavailable
-                </div>
-              )}
             </div>
           </div>
         )}
