@@ -30,39 +30,69 @@ function mapLanguage(languageCode: string) {
   return "Any";
 }
 
+/**
+ * Convert TMDB genres into the moods used by Kya Dekhein.
+ *
+ * Important:
+ * TMDB genres are not the same thing as our moods.
+ * For example, Action does NOT automatically mean Thrilling.
+ */
 function inferMoods(genreIds: number[]) {
   const result: string[] = [];
 
-  if (genreIds.includes(35) || genreIds.includes(10751)) {
+  // 😂 Fun
+  if (
+    genreIds.includes(35) || // Comedy
+    genreIds.includes(12) || // Adventure
+    genreIds.includes(10751) // Family
+  ) {
     result.push("Fun");
   }
 
-  if (genreIds.includes(18) || genreIds.includes(36)) {
+  // 😌 Chill
+  if (
+    genreIds.includes(10402) || // Music
+    genreIds.includes(16) || // Animation
+    genreIds.includes(14) // Fantasy
+  ) {
+    result.push("Chill");
+  }
+
+  // 🧠 Interesting
+  if (
+    genreIds.includes(99) || // Documentary
+    genreIds.includes(36) || // History
+    genreIds.includes(878) || // Science Fiction
+    genreIds.includes(9648) // Mystery
+  ) {
     result.push("Interesting");
   }
 
-  if (genreIds.includes(28) || genreIds.includes(53)) {
+  // 😱 Thrilling
+  //
+  // Action alone is deliberately NOT enough.
+  // Thriller, Crime and Mystery are much stronger signals.
+  if (
+    genreIds.includes(53) || // Thriller
+    genreIds.includes(80) || // Crime
+    genreIds.includes(9648) || // Mystery
+    (genreIds.includes(28) && genreIds.includes(53)) // Action + Thriller
+  ) {
     result.push("Thrilling");
   }
 
-  if (genreIds.includes(27)) {
-    result.push("Horror");
-  }
-
+  // ❤️ Feel-good
   if (
-    genreIds.includes(10749) ||
-    genreIds.includes(10751) ||
-    genreIds.includes(35)
+    genreIds.includes(35) || // Comedy
+    genreIds.includes(10749) || // Romance
+    genreIds.includes(10751) // Family
   ) {
     result.push("Feel-good");
   }
 
-  if (
-    genreIds.includes(99) ||
-    genreIds.includes(10402) ||
-    genreIds.includes(16)
-  ) {
-    result.push("Chill");
+  // 😈 Horror
+  if (genreIds.includes(27)) {
+    result.push("Horror");
   }
 
   return result;
@@ -87,6 +117,9 @@ function getRecommendations(
           : Infinity;
 
   const scored = items
+    // A movie MUST match the selected mood.
+    .filter((item) => item.moods.includes(selectedMood))
+    // Keep the existing time bands.
     .filter(
       (item) =>
         item.runtime >= minimumMinutes &&
@@ -95,14 +128,16 @@ function getRecommendations(
     .map((item) => {
       let score = 0;
 
-      if (item.moods.includes(selectedMood)) {
-        score += 25;
-      }
+      // Strong mood match.
+      score += 40;
 
+      // Language match.
       if (language === "Any" || item.language === language) {
         score += 10;
       }
 
+      // Higher-rated movies get a small boost,
+      // but rating cannot override the mood requirement.
       score += item.rating;
 
       return { item, score };
@@ -127,6 +162,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const [hasRecommended, setHasRecommended] = useState(false);
 
+  // Automatically scroll to the recommendation when results appear.
   useEffect(() => {
     if (recommendations.length > 0) {
       document.getElementById("recommendation")?.scrollIntoView({
@@ -146,19 +182,44 @@ export default function Home() {
     setHasRecommended(true);
 
     try {
+      const selectedMood = getMoodName(mood);
+
       const params = new URLSearchParams();
 
+      // Language filter.
       if (language === "Hindi") {
         params.set("language", "hi");
       } else if (language === "English") {
         params.set("language", "en");
       }
 
-      if (getMoodName(mood) === "Horror") {
+      /**
+       * Use TMDB's genre filtering where it makes sense.
+       *
+       * Horror:
+       *   27 = Horror
+       *
+       * Thrilling:
+       *   53 = Thriller
+       *   80 = Crime
+       *   9648 = Mystery
+       *
+       * The pipe means OR in TMDB's genre filtering:
+       * Thriller OR Crime OR Mystery.
+       */
+      if (selectedMood === "Horror") {
         params.set("genre", "27");
+      } else if (selectedMood === "Thrilling") {
+        params.set("genre", "53|80|9648");
       }
 
-      const response = await fetch(`/api/tmdb?${params.toString()}`);
+      const query = params.toString();
+
+      const listUrl = query
+        ? `/api/tmdb?${query}`
+        : "/api/tmdb";
+
+      const response = await fetch(listUrl);
 
       if (!response.ok) {
         throw new Error("Failed to load movies");
@@ -166,7 +227,8 @@ export default function Home() {
 
       const data = await response.json();
 
-      // /api/tmdb returns { count, movies }
+      // /api/tmdb returns:
+      // { count, movies }
       const movies = data.movies;
 
       if (!Array.isArray(movies)) {
@@ -191,8 +253,10 @@ export default function Home() {
             continue;
           }
 
-          // The list API returns genreIds.
-          // The details API returns genres: [{ id, name }, ...].
+          /**
+           * The list API provides genreIds.
+           * The details API provides genres: [{ id, name }]
+           */
           const genreIds =
             movie.genreIds ||
             details.genres?.map(
@@ -200,19 +264,19 @@ export default function Home() {
             ) ||
             [];
 
-          // The details API returns "language".
           const itemLanguage = mapLanguage(
             details.language || movie.language
           );
 
-          // Keep language filtering strict when a specific
-          // language is selected.
+          // Strict language filtering.
           if (
             language !== "Any" &&
             itemLanguage !== language
           ) {
             continue;
           }
+
+          const moodsForMovie = inferMoods(genreIds);
 
           const watchProviders: WatchProviders =
             details.watchProviders || {
@@ -229,8 +293,11 @@ export default function Home() {
             type: "movie",
             runtime: details.runtime,
             language: itemLanguage,
-            moods: inferMoods(genreIds),
-            rating: details.rating ?? movie.rating ?? 0,
+            moods: moodsForMovie,
+            rating:
+              details.rating ??
+              movie.rating ??
+              0,
             url: `https://www.themoviedb.org/movie/${
               details.id || movie.id
             }`,
@@ -251,7 +318,7 @@ export default function Home() {
             isFree: false,
           });
         } catch {
-          // Skip individual movies if their details fail to load.
+          // Skip individual movies if their details fail.
         }
       }
 
@@ -281,7 +348,9 @@ export default function Home() {
     }
 
     setCurrentRecommendation((current) =>
-      current + 1 >= recommendations.length ? 0 : current + 1
+      current + 1 >= recommendations.length
+        ? 0
+        : current + 1
     );
   }
 
@@ -371,7 +440,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Free First */}
+        {/* Free first */}
         {/*
         <section className="mb-8">
           <button
