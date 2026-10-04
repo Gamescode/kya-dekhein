@@ -21,7 +21,8 @@ async function fetchWithRetry(
       lastError = error;
 
       console.warn(
-        `TMDB request failed (attempt ${attempt + 1}/${retries + 1}):`,
+        `TMDB request failed (attempt ${attempt + 1
+        }/${retries + 1}):`,
         error
       );
 
@@ -39,58 +40,60 @@ export async function GET(request: Request) {
 
   if (!apiKey) {
     return NextResponse.json(
-      { error: "TMDB_API_KEY is missing" },
-      { status: 500 }
+      {
+        error: "TMDB_API_KEY is missing",
+      },
+      {
+        status: 500,
+      }
     );
   }
 
   const { searchParams } = new URL(request.url);
+
   const movieId = searchParams.get("id");
   const genre = searchParams.get("genre");
   const language = searchParams.get("language");
 
-  try {
-    // ------------------------------------------------------------
-    // MOVIE DETAILS
-    // ------------------------------------------------------------
-    if (movieId) {
-      const movieEndpoint = `https://api.themoviedb.org/3/movie/${encodeURIComponent(
-        movieId
-      )}?api_key=${apiKey}&language=en-IN`;
+  // Runtime filters
+  const minRuntime = searchParams.get("minRuntime");
+  const maxRuntime = searchParams.get("maxRuntime");
 
-      const response = await fetchWithRetry(movieEndpoint);
+  try {
+    /*
+     * ------------------------------------------------------------
+     * SINGLE MOVIE DETAILS
+     * ------------------------------------------------------------
+     */
+
+    if (movieId) {
+      const movieEndpoint =
+        `https://api.themoviedb.org/3/movie/` +
+        `${encodeURIComponent(movieId)}` +
+        `?api_key=${apiKey}` +
+        `&language=en-IN` +
+        `&append_to_response=watch/providers`;
+
+      const response =
+        await fetchWithRetry(movieEndpoint);
 
       if (!response.ok) {
         return NextResponse.json(
-          { error: "TMDB movie details request failed" },
-          { status: response.status }
+          {
+            error:
+              "TMDB movie details request failed",
+          },
+          {
+            status: response.status,
+          }
         );
       }
 
       const movie = await response.json();
 
-      // Get watch-provider information for India.
-      const providersEndpoint = `https://api.themoviedb.org/3/movie/${encodeURIComponent(
-        movieId
-      )}/watch/providers?api_key=${apiKey}`;
-
-      let indiaProviders = null;
-
-      try {
-        const providersResponse = await fetchWithRetry(providersEndpoint);
-
-        if (providersResponse.ok) {
-          const providersData = await providersResponse.json();
-          indiaProviders = providersData.results?.IN ?? null;
-        }
-      } catch (error) {
-        // Watch-provider information is optional.
-        // Don't fail the whole movie request if this call fails.
-        console.warn(
-          `TMDB watch providers request failed for movie ${movieId}:`,
-          error
-        );
-      }
+      const indiaProviders =
+        movie["watch/providers"]?.results?.IN ??
+        null;
 
       return NextResponse.json({
         id: movie.id,
@@ -101,13 +104,16 @@ export async function GET(request: Request) {
         language: movie.original_language,
         releaseDate: movie.release_date,
         genres: movie.genres,
+        posterPath: movie.poster_path,
         watchProviders: indiaProviders,
       });
     }
 
-    // ------------------------------------------------------------
-    // MOVIE LIST
-    // ------------------------------------------------------------
+    /*
+     * ------------------------------------------------------------
+     * MOVIE LIST
+     * ------------------------------------------------------------
+     */
 
     const params = new URLSearchParams({
       api_key: apiKey,
@@ -117,77 +123,157 @@ export async function GET(request: Request) {
       page: "1",
     });
 
+    /*
+     * Language filter
+     */
     if (language) {
-      params.set("with_original_language", language);
+      params.set(
+        "with_original_language",
+        language
+      );
     }
 
+    /*
+     * Genre filter
+     */
     if (genre) {
       params.set("with_genres", genre);
     }
 
-    // Use discover when filtering by language or genre.
-    // Use popular for the unfiltered "Any" case.
-    const endpoint =
-      language || genre
-        ? `https://api.themoviedb.org/3/discover/movie?${params.toString()}`
-        : `https://api.themoviedb.org/3/movie/popular?api_key=${apiKey}&language=en-IN&region=IN&page=1`;
-
-    console.log(
-      "TMDB endpoint:",
-      endpoint.replace(apiKey, "HIDDEN")
-    );
-
-    const response = await fetchWithRetry(endpoint);
-
-    if (!response.ok) {
-      return NextResponse.json(
-        { error: "TMDB movie list request failed" },
-        { status: response.status }
-      );
+    /*
+     * Runtime filters
+     *
+     * Examples:
+     *
+     * 60  => max 60
+     * 90  => 61–90
+     * 120 => 91–120
+     * 180 => 121–180
+     */
+    if (minRuntime) {
+      params.set("with_runtime.gte", minRuntime);
     }
 
-    const data = await response.json();
+    if (maxRuntime) {
+      params.set("with_runtime.lte", maxRuntime);
+    }
 
-    const movies = data.results.map(
-      (movie: {
-        id: number;
-        title: string;
-        overview: string;
-        vote_average: number;
-        original_language: string;
-        release_date: string;
-        genre_ids: number[];
-        poster_path: string | null;
-      }) => ({
-        id: movie.id,
-        title: movie.title,
-        description: movie.overview,
-        rating: movie.vote_average,
-        language: movie.original_language,
-        releaseDate: movie.release_date,
-        genreIds: movie.genre_ids,
-        posterPath: movie.poster_path,
-      })
-    );
+    /*
+     * Use Discover whenever we have any filters.
+     * Otherwise keep the existing popular-movies behaviour.
+     */
+    const hasDiscoverFilters =
+      Boolean(language) ||
+      Boolean(genre) ||
+      Boolean(minRuntime) ||
+      Boolean(maxRuntime);
+
+    const pages = [1, 2, 3];
+
+    const allResults: Array<{
+      id: number;
+      title: string;
+      overview: string;
+      vote_average: number;
+      original_language: string;
+      release_date: string;
+      genre_ids: number[];
+      poster_path: string | null;
+    }> = [];
+
+    /*
+     * Fetch the three candidate pages in parallel.
+     */
+    const pageRequests = pages.map(async (page) => {
+      const pageParams = new URLSearchParams(
+        params
+      );
+
+      pageParams.set("page", String(page));
+
+      const pageEndpoint = hasDiscoverFilters
+        ? `https://api.themoviedb.org/3/discover/movie?${pageParams.toString()}`
+        : `https://api.themoviedb.org/3/movie/popular?api_key=${apiKey}&language=en-IN&region=IN&page=${page}`;
+
+      console.log(
+        `TMDB page ${page}:`,
+        pageEndpoint.replace(apiKey, "HIDDEN")
+      );
+
+      try {
+        const response =
+          await fetchWithRetry(pageEndpoint);
+
+        if (!response.ok) {
+          console.warn(
+            `TMDB page ${page} request failed`
+          );
+
+          return [];
+        }
+
+        const data = await response.json();
+
+        if (Array.isArray(data.results)) {
+          return data.results;
+        }
+
+        return [];
+      } catch (error) {
+        console.warn(
+          `TMDB page ${page} failed:`,
+          error
+        );
+
+        return [];
+      }
+    });
+
+    const pageResults =
+      await Promise.all(pageRequests);
+
+    for (const results of pageResults) {
+      allResults.push(...results);
+    }
+
+    /*
+     * Return only the fields needed by page.tsx.
+     */
+    const movies = allResults.map((movie) => ({
+      id: movie.id,
+      title: movie.title,
+      description: movie.overview,
+      rating: movie.vote_average,
+      language: movie.original_language,
+      releaseDate: movie.release_date,
+      genreIds: movie.genre_ids,
+      posterPath: movie.poster_path,
+    }));
 
     return NextResponse.json({
       count: movies.length,
       movies,
     });
   } catch (error) {
-    console.error("TMDB API route error:", error);
+    console.error(
+      "TMDB API route error:",
+      error
+    );
 
     return NextResponse.json(
       {
         error: "TMDB request failed",
         details:
           error instanceof Error
-            ? `${error.message}${
-                error.cause ? ` — ${String(error.cause)}` : ""
-              }`
+            ? `${error.message}${error.cause
+              ? ` — ${String(error.cause)}`
+              : ""
+            }`
             : String(error),
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }

@@ -30,69 +30,57 @@ function mapLanguage(languageCode: string) {
   return "Any";
 }
 
-/**
- * Convert TMDB genres into the moods used by Kya Dekhein.
- *
- * Important:
- * TMDB genres are not the same thing as our moods.
- * For example, Action does NOT automatically mean Thrilling.
- */
+function getRuntimeBracket(time: string) {
+  const minutes = getMinutes(time);
+
+  if (minutes === 60) {
+    return { min: 0, max: 60 };
+  }
+
+  if (minutes === 90) {
+    return { min: 61, max: 90 };
+  }
+
+  if (minutes === 120) {
+    return { min: 91, max: 120 };
+  }
+
+  return { min: 121, max: 180 };
+}
+
 function inferMoods(genreIds: number[]) {
   const result: string[] = [];
 
-  // 😂 Fun
-  if (
-    genreIds.includes(35) || // Comedy
-    genreIds.includes(12) || // Adventure
-    genreIds.includes(10751) // Family
-  ) {
+  if (genreIds.includes(35) || genreIds.includes(10751)) {
     result.push("Fun");
   }
 
-  // 😌 Chill
-  if (
-    genreIds.includes(10402) || // Music
-    genreIds.includes(16) || // Animation
-    genreIds.includes(14) // Fantasy
-  ) {
-    result.push("Chill");
-  }
-
-  // 🧠 Interesting
-  if (
-    genreIds.includes(99) || // Documentary
-    genreIds.includes(36) || // History
-    genreIds.includes(878) || // Science Fiction
-    genreIds.includes(9648) // Mystery
-  ) {
+  if (genreIds.includes(18) || genreIds.includes(36)) {
     result.push("Interesting");
   }
 
-  // 😱 Thrilling
-  //
-  // Action alone is deliberately NOT enough.
-  // Thriller, Crime and Mystery are much stronger signals.
-  if (
-    genreIds.includes(53) || // Thriller
-    genreIds.includes(80) || // Crime
-    genreIds.includes(9648) || // Mystery
-    (genreIds.includes(28) && genreIds.includes(53)) // Action + Thriller
-  ) {
+  if (genreIds.includes(28) || genreIds.includes(53)) {
     result.push("Thrilling");
   }
 
-  // ❤️ Feel-good
+  if (genreIds.includes(27)) {
+    result.push("Horror");
+  }
+
   if (
-    genreIds.includes(35) || // Comedy
-    genreIds.includes(10749) || // Romance
-    genreIds.includes(10751) // Family
+    genreIds.includes(10749) ||
+    genreIds.includes(10751) ||
+    genreIds.includes(35)
   ) {
     result.push("Feel-good");
   }
 
-  // 😈 Horror
-  if (genreIds.includes(27)) {
-    result.push("Horror");
+  if (
+    genreIds.includes(99) ||
+    genreIds.includes(10402) ||
+    genreIds.includes(16)
+  ) {
+    result.push("Chill");
   }
 
   return result;
@@ -104,40 +92,26 @@ function getRecommendations(
   mood: string,
   language: string
 ): ContentItem[] {
-  const minimumMinutes = getMinutes(time);
+  const bracket = getRuntimeBracket(time);
   const selectedMood = getMoodName(mood);
 
-  const maximumMinutes =
-    minimumMinutes === 60
-      ? 90
-      : minimumMinutes === 90
-        ? 120
-        : minimumMinutes === 120
-          ? 180
-          : Infinity;
-
   const scored = items
-    // A movie MUST match the selected mood.
-    .filter((item) => item.moods.includes(selectedMood))
-    // Keep the existing time bands.
     .filter(
       (item) =>
-        item.runtime >= minimumMinutes &&
-        item.runtime < maximumMinutes
+        item.runtime >= bracket.min &&
+        item.runtime <= bracket.max
     )
     .map((item) => {
       let score = 0;
 
-      // Strong mood match.
-      score += 40;
+      if (item.moods.includes(selectedMood)) {
+        score += 25;
+      }
 
-      // Language match.
       if (language === "Any" || item.language === language) {
         score += 10;
       }
 
-      // Higher-rated movies get a small boost,
-      // but rating cannot override the mood requirement.
       score += item.rating;
 
       return { item, score };
@@ -153,16 +127,17 @@ export default function Home() {
   const [mood, setMood] = useState("");
   const [language, setLanguage] = useState("");
 
-  // Free First is currently disabled because it has not been implemented yet.
-  // const [freeFirst, setFreeFirst] = useState(true);
-
-  const [recommendations, setRecommendations] = useState<ContentItem[]>([]);
+  const [recommendations, setRecommendations] = useState<ContentItem[]>(
+    []
+  );
   const [currentRecommendation, setCurrentRecommendation] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState(
+    "Finding something good..."
+  );
   const [error, setError] = useState("");
   const [hasRecommended, setHasRecommended] = useState(false);
 
-  // Automatically scroll to the recommendation when results appear.
   useEffect(() => {
     if (recommendations.length > 0) {
       document.getElementById("recommendation")?.scrollIntoView({
@@ -171,6 +146,30 @@ export default function Home() {
       });
     }
   }, [recommendations]);
+
+  useEffect(() => {
+    if (!loading) {
+      setLoadingMessage("Finding something good...");
+      return;
+    }
+
+    const messages = [
+      "Finding something good...",
+      "Looking through the movies...",
+      "Matching your mood...",
+      "Checking the runtime...",
+      "Almost there...",
+    ];
+
+    let index = 0;
+
+    const interval = setInterval(() => {
+      index = (index + 1) % messages.length;
+      setLoadingMessage(messages[index]);
+    }, 1800);
+
+    return () => clearInterval(interval);
+  }, [loading]);
 
   const canRecommend = Boolean(time && mood && language);
 
@@ -182,44 +181,24 @@ export default function Home() {
     setHasRecommended(true);
 
     try {
-      const selectedMood = getMoodName(mood);
+      const bracket = getRuntimeBracket(time);
 
       const params = new URLSearchParams();
 
-      // Language filter.
       if (language === "Hindi") {
         params.set("language", "hi");
       } else if (language === "English") {
         params.set("language", "en");
       }
 
-      /**
-       * Use TMDB's genre filtering where it makes sense.
-       *
-       * Horror:
-       *   27 = Horror
-       *
-       * Thrilling:
-       *   53 = Thriller
-       *   80 = Crime
-       *   9648 = Mystery
-       *
-       * The pipe means OR in TMDB's genre filtering:
-       * Thriller OR Crime OR Mystery.
-       */
-      if (selectedMood === "Horror") {
+      if (getMoodName(mood) === "Horror") {
         params.set("genre", "27");
-      } else if (selectedMood === "Thrilling") {
-        params.set("genre", "53|80|9648");
       }
 
-      const query = params.toString();
+      params.set("minRuntime", String(bracket.min));
+      params.set("maxRuntime", String(bracket.max));
 
-      const listUrl = query
-        ? `/api/tmdb?${query}`
-        : "/api/tmdb";
-
-      const response = await fetch(listUrl);
+      const response = await fetch(`/api/tmdb?${params.toString()}`);
 
       if (!response.ok) {
         throw new Error("Failed to load movies");
@@ -227,9 +206,7 @@ export default function Home() {
 
       const data = await response.json();
 
-      // /api/tmdb returns:
-      // { count, movies }
-      const movies = data.movies;
+      const movies = Array.isArray(data) ? data : data.movies;
 
       if (!Array.isArray(movies)) {
         throw new Error("Invalid movie data");
@@ -237,88 +214,105 @@ export default function Home() {
 
       const detailedItems: ContentItem[] = [];
 
-      for (const movie of movies) {
-        try {
-          const detailsResponse = await fetch(
-            `/api/tmdb?id=${movie.id}`
-          );
+      const BATCH_SIZE = 10;
 
-          if (!detailsResponse.ok) {
-            continue;
+      for (let i = 0; i < movies.length; i += BATCH_SIZE) {
+        const batch = movies.slice(i, i + BATCH_SIZE);
+
+        const batchResults = await Promise.all(
+          batch.map(async (movie) => {
+            try {
+              const detailsResponse = await fetch(
+                `/api/tmdb?id=${movie.id}`
+              );
+
+              if (!detailsResponse.ok) {
+                return null;
+              }
+
+              const details = await detailsResponse.json();
+
+              if (!details.runtime) {
+                return null;
+              }
+
+              const genreIds =
+                details.genreIds ||
+                details.genre_ids ||
+                movie.genre_ids ||
+                [];
+
+              const itemLanguage = mapLanguage(
+                details.language || details.original_language
+              );
+
+              if (
+                language !== "Any" &&
+                itemLanguage !== language
+              ) {
+                return null;
+              }
+
+              // Final runtime safety check.
+              if (
+                details.runtime < bracket.min ||
+                details.runtime > bracket.max
+              ) {
+                return null;
+              }
+
+              const watchProviders: WatchProviders =
+                details.watchProviders || {
+                  flatrate: [],
+                  free: [],
+                  ads: [],
+                  rent: [],
+                  buy: [],
+                };
+
+              return {
+                id: details.id || movie.id,
+                title: details.title || movie.title,
+                type: "movie",
+                runtime: details.runtime,
+                language: itemLanguage,
+                moods: inferMoods(genreIds),
+                rating:
+                  details.rating ??
+                  details.vote_average ??
+                  movie.vote_average ??
+                  0,
+                url: `https://www.themoviedb.org/movie/${details.id || movie.id
+                  }`,
+                description:
+                  details.description ||
+                  details.overview ||
+                  movie.overview ||
+                  "No description available.",
+                releaseDate:
+                  details.releaseDate ||
+                  details.release_date ||
+                  movie.release_date ||
+                  "",
+                genreIds,
+                posterPath:
+                  details.posterPath ||
+                  details.poster_path ||
+                  movie.poster_path ||
+                  null,
+                watchProviders,
+                isFree: false,
+              } as ContentItem;
+            } catch {
+              return null;
+            }
+          })
+        );
+
+        for (const item of batchResults) {
+          if (item) {
+            detailedItems.push(item);
           }
-
-          const details = await detailsResponse.json();
-
-          if (!details.runtime) {
-            continue;
-          }
-
-          /**
-           * The list API provides genreIds.
-           * The details API provides genres: [{ id, name }]
-           */
-          const genreIds =
-            movie.genreIds ||
-            details.genres?.map(
-              (genre: { id: number }) => genre.id
-            ) ||
-            [];
-
-          const itemLanguage = mapLanguage(
-            details.language || movie.language
-          );
-
-          // Strict language filtering.
-          if (
-            language !== "Any" &&
-            itemLanguage !== language
-          ) {
-            continue;
-          }
-
-          const moodsForMovie = inferMoods(genreIds);
-
-          const watchProviders: WatchProviders =
-            details.watchProviders || {
-              flatrate: [],
-              free: [],
-              ads: [],
-              rent: [],
-              buy: [],
-            };
-
-          detailedItems.push({
-            id: details.id || movie.id,
-            title: details.title || movie.title,
-            type: "movie",
-            runtime: details.runtime,
-            language: itemLanguage,
-            moods: moodsForMovie,
-            rating:
-              details.rating ??
-              movie.rating ??
-              0,
-            url: `https://www.themoviedb.org/movie/${
-              details.id || movie.id
-            }`,
-            description:
-              details.description ||
-              movie.description ||
-              "No description available.",
-            releaseDate:
-              details.releaseDate ||
-              movie.releaseDate ||
-              "",
-            genreIds,
-            posterPath:
-              details.posterPath ||
-              movie.posterPath ||
-              null,
-            watchProviders,
-            isFree: false,
-          });
-        } catch {
-          // Skip individual movies if their details fail.
         }
       }
 
@@ -339,8 +333,7 @@ export default function Home() {
     }
   }
 
-  const currentMovie =
-    recommendations[currentRecommendation];
+  const currentMovie = recommendations[currentRecommendation];
 
   function handleAnother() {
     if (recommendations.length <= 1) {
@@ -348,16 +341,13 @@ export default function Home() {
     }
 
     setCurrentRecommendation((current) =>
-      current + 1 >= recommendations.length
-        ? 0
-        : current + 1
+      current + 1 >= recommendations.length ? 0 : current + 1
     );
   }
 
   return (
     <main className="min-h-screen bg-white text-gray-900">
       <div className="mx-auto max-w-4xl px-6 py-12">
-        {/* Header */}
         <header className="mb-12 text-center">
           <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
             Kya Dekhein?
@@ -368,7 +358,6 @@ export default function Home() {
           </p>
         </header>
 
-        {/* Time */}
         <section className="mb-8">
           <h2 className="mb-4 text-xl font-semibold">
             How much time do you have?
@@ -380,11 +369,10 @@ export default function Home() {
                 key={option}
                 type="button"
                 onClick={() => setTime(option)}
-                className={`rounded-2xl border px-4 py-4 text-sm font-medium transition ${
-                  time === option
+                className={`rounded-2xl border px-4 py-4 text-sm font-medium transition ${time === option
                     ? "border-black bg-black text-white"
                     : "border-gray-200 bg-white hover:border-gray-400"
-                }`}
+                  }`}
               >
                 {option}
               </button>
@@ -392,7 +380,6 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Mood */}
         <section className="mb-8">
           <h2 className="mb-4 text-xl font-semibold">
             What are you in the mood for?
@@ -404,11 +391,10 @@ export default function Home() {
                 key={option}
                 type="button"
                 onClick={() => setMood(option)}
-                className={`rounded-2xl border px-4 py-4 text-sm font-medium transition ${
-                  mood === option
+                className={`rounded-2xl border px-4 py-4 text-sm font-medium transition ${mood === option
                     ? "border-black bg-black text-white"
                     : "border-gray-200 bg-white hover:border-gray-400"
-                }`}
+                  }`}
               >
                 {option}
               </button>
@@ -416,7 +402,6 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Language */}
         <section className="mb-8">
           <h2 className="mb-4 text-xl font-semibold">
             Which language?
@@ -428,11 +413,10 @@ export default function Home() {
                 key={option}
                 type="button"
                 onClick={() => setLanguage(option)}
-                className={`rounded-2xl border px-4 py-4 text-sm font-medium transition ${
-                  language === option
+                className={`rounded-2xl border px-4 py-4 text-sm font-medium transition ${language === option
                     ? "border-black bg-black text-white"
                     : "border-gray-200 bg-white hover:border-gray-400"
-                }`}
+                  }`}
               >
                 {option}
               </button>
@@ -440,42 +424,34 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Free first */}
-        {/*
-        <section className="mb-8">
-          <button
-            type="button"
-            onClick={() => setFreeFirst(!freeFirst)}
-          >
-            Free first
-          </button>
-        </section>
-        */}
-
-        {/* Recommend */}
         <button
           type="button"
           disabled={!canRecommend || loading}
           onClick={handleRecommend}
-          className={`w-full rounded-2xl px-6 py-4 text-lg font-semibold transition ${
-            canRecommend && !loading
+          className={`w-full rounded-2xl px-6 py-4 text-lg font-semibold transition ${canRecommend && !loading
               ? "bg-black text-white hover:bg-gray-800"
               : "cursor-not-allowed bg-gray-200 text-gray-400"
-          }`}
+            }`}
         >
-          {loading
-            ? "Finding something..."
-            : "What should I watch?"}
+          {loading ? (
+            <span className="flex items-center justify-center gap-3">
+              <span className="inline-block animate-bounce text-2xl">
+                🎬
+              </span>
+
+              <span>{loadingMessage}</span>
+            </span>
+          ) : (
+            "🎲 Kya Dekhein?"
+          )}
         </button>
 
-        {/* Error */}
         {error && (
           <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-center text-sm text-red-700">
             {error}
           </div>
         )}
 
-        {/* No results */}
         {hasRecommended &&
           recommendations.length === 0 &&
           !loading &&
@@ -491,7 +467,6 @@ export default function Home() {
             </div>
           )}
 
-        {/* Recommendation */}
         {currentMovie && (
           <div
             id="recommendation"
