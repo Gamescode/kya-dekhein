@@ -40,12 +40,8 @@ export async function GET(request: Request) {
 
   if (!apiKey) {
     return NextResponse.json(
-      {
-        error: "TMDB_API_KEY is missing",
-      },
-      {
-        status: 500,
-      }
+      { error: "TMDB_API_KEY is missing" },
+      { status: 500 }
     );
   }
 
@@ -54,18 +50,19 @@ export async function GET(request: Request) {
   const movieId = searchParams.get("id");
   const genre = searchParams.get("genre");
   const language = searchParams.get("language");
-
-  // Runtime filters
   const minRuntime = searchParams.get("minRuntime");
   const maxRuntime = searchParams.get("maxRuntime");
+  const freeOnly =
+    searchParams.get("freeOnly") === "true";
 
   try {
     /*
-     * ------------------------------------------------------------
-     * SINGLE MOVIE DETAILS
-     * ------------------------------------------------------------
+     * ---------------------------------------------------------
+     * MOVIE DETAILS
+     * ---------------------------------------------------------
+     *
+     * Fetch movie details + India watch providers in one request.
      */
-
     if (movieId) {
       const movieEndpoint =
         `https://api.themoviedb.org/3/movie/` +
@@ -74,26 +71,21 @@ export async function GET(request: Request) {
         `&language=en-IN` +
         `&append_to_response=watch/providers`;
 
-      const response =
-        await fetchWithRetry(movieEndpoint);
+      const response = await fetchWithRetry(movieEndpoint);
 
       if (!response.ok) {
         return NextResponse.json(
           {
-            error:
-              "TMDB movie details request failed",
+            error: "TMDB movie details request failed",
           },
-          {
-            status: response.status,
-          }
+          { status: response.status }
         );
       }
 
       const movie = await response.json();
 
       const indiaProviders =
-        movie["watch/providers"]?.results?.IN ??
-        null;
+        movie["watch/providers"]?.results?.IN ?? null;
 
       return NextResponse.json({
         id: movie.id,
@@ -104,15 +96,30 @@ export async function GET(request: Request) {
         language: movie.original_language,
         releaseDate: movie.release_date,
         genres: movie.genres,
+        genreIds: (movie.genres ?? []).map(
+          (genre: { id: number }) => genre.id
+        ),
         posterPath: movie.poster_path,
+
+        /*
+         * This contains:
+         * - link
+         * - flatrate
+         * - free
+         * - ads
+         * - rent
+         * - buy
+         *
+         * for India.
+         */
         watchProviders: indiaProviders,
       });
     }
 
     /*
-     * ------------------------------------------------------------
+     * ---------------------------------------------------------
      * MOVIE LIST
-     * ------------------------------------------------------------
+     * ---------------------------------------------------------
      */
 
     const params = new URLSearchParams({
@@ -123,33 +130,14 @@ export async function GET(request: Request) {
       page: "1",
     });
 
-    /*
-     * Language filter
-     */
     if (language) {
-      params.set(
-        "with_original_language",
-        language
-      );
+      params.set("with_original_language", language);
     }
 
-    /*
-     * Genre filter
-     */
     if (genre) {
       params.set("with_genres", genre);
     }
 
-    /*
-     * Runtime filters
-     *
-     * Examples:
-     *
-     * 60  => max 60
-     * 90  => 61–90
-     * 120 => 91–120
-     * 180 => 121–180
-     */
     if (minRuntime) {
       params.set("with_runtime.gte", minRuntime);
     }
@@ -159,35 +147,35 @@ export async function GET(request: Request) {
     }
 
     /*
-     * Use Discover whenever we have any filters.
-     * Otherwise keep the existing popular-movies behaviour.
+     * When Free to watch is enabled:
+     *
+     * - restrict to India
+     * - only movies marked free OR ad-supported by TMDB
      */
+    if (freeOnly) {
+      params.set("watch_region", "IN");
+      params.set(
+        "with_watch_monetization_types",
+        "free|ads"
+      );
+    }
+
     const hasDiscoverFilters =
       Boolean(language) ||
       Boolean(genre) ||
       Boolean(minRuntime) ||
-      Boolean(maxRuntime);
-
-    const pages = [1, 2, 3];
-
-    const allResults: Array<{
-      id: number;
-      title: string;
-      overview: string;
-      vote_average: number;
-      original_language: string;
-      release_date: string;
-      genre_ids: number[];
-      poster_path: string | null;
-    }> = [];
+      Boolean(maxRuntime) ||
+      freeOnly;
 
     /*
-     * Fetch the three candidate pages in parallel.
+     * Fetch three pages in parallel.
+     *
+     * This keeps the existing performance improvement.
      */
+    const pages = [1, 2, 3];
+
     const pageRequests = pages.map(async (page) => {
-      const pageParams = new URLSearchParams(
-        params
-      );
+      const pageParams = new URLSearchParams(params);
 
       pageParams.set("page", String(page));
 
@@ -232,13 +220,8 @@ export async function GET(request: Request) {
     const pageResults =
       await Promise.all(pageRequests);
 
-    for (const results of pageResults) {
-      allResults.push(...results);
-    }
+    const allResults = pageResults.flat();
 
-    /*
-     * Return only the fields needed by page.tsx.
-     */
     const movies = allResults.map((movie) => ({
       id: movie.id,
       title: movie.title,
@@ -271,9 +254,7 @@ export async function GET(request: Request) {
             }`
             : String(error),
       },
-      {
-        status: 500,
-      }
+      { status: 500 }
     );
   }
 }
