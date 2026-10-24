@@ -28,6 +28,10 @@ export const metadata: Metadata = {
     follow: true,
   },
 
+  verification: {
+    google: "N8Yyuxtod5LpHwMEYGsKbyIr1088yg8upBhv8OH1xtE",
+  },
+
   openGraph: {
     title: "Kya Dekhein? — Find Your Next Movie",
     description:
