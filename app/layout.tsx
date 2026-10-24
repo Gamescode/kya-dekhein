@@ -13,14 +13,29 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Kya Dekhein?",
-  description: "Don't browse. Just watch.",
+  metadataBase: new URL("https://kya-dekhein.vercel.app"),
+
+  title: "Kya Dekhein? — Find Your Next Movie",
+  description:
+    "Not sure what to watch? Find a movie matching your mood, available time, and language.",
+
+  alternates: {
+    canonical: "/",
+  },
+
+  robots: {
+    index: true,
+    follow: true,
+  },
+
   openGraph: {
-    title: "Kya Dekhein?",
-    description: "Don't browse. Just watch.",
+    title: "Kya Dekhein? — Find Your Next Movie",
+    description:
+      "Not sure what to watch? Find a movie matching your mood, available time, and language.",
     url: "https://kya-dekhein.vercel.app/",
     siteName: "Kya Dekhein?",
     type: "website",
+    locale: "en_IN",
   },
 };
 
