@@ -1,7 +1,7 @@
 export const metadata = {
     title: "Privacy Policy | Kya Dekhein?",
     description:
-        "Learn how Kya Dekhein? handles information, third-party services, cookies, and privacy.",
+        "Learn how Kya Dekhein? handles information, analytics, third-party services, cookies, and privacy.",
 };
 
 export default function PrivacyPage() {
@@ -63,16 +63,33 @@ export default function PrivacyPage() {
                 3. Hosting, Cookies, and Analytics
             </h2>
             <p className="mt-2 leading-7 text-gray-700">
-                Kya Dekhein? is hosted on Vercel. Vercel and other infrastructure
-                providers may process technical information and use technologies
-                necessary for hosting, security, and service delivery. For details,
-                please review the relevant providers' privacy policies.
+                Kya Dekhein? is hosted on Vercel. We use Vercel Web Analytics to
+                understand general website usage, including visitor activity and
+                page views, so we can evaluate and improve the website.
             </p>
             <p className="mt-2 leading-7 text-gray-700">
-                We do not currently have Vercel Web Analytics enabled. This may
-                change if we introduce analytics or other measurement services in
-                the future. Any such services will be subject to their applicable
-                privacy disclosures and settings.
+                Vercel may process technical information associated with website
+                visits to provide analytics, hosting, and security services.
+                Analytics data collection may be affected by browser settings,
+                content blockers, and other technical limitations. For more
+                information, please review Vercel's privacy policy.
+            </p>
+            <p className="mt-2 leading-7 text-gray-700">
+                Vercel Web Analytics is distinct from advertising tracking.
+                We may use essential technical technologies needed to operate
+                and secure the website. The use of cookies or similar technologies
+                by third-party services depends on the services and features enabled.
+            </p>
+            <p className="mt-2 leading-7 text-gray-700">
+                Vercel Privacy Policy:{" "}
+                <a
+                    href="https://vercel.com/legal/privacy-policy"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline"
+                >
+                    https://vercel.com/legal/privacy-policy
+                </a>
             </p>
 
             <h2 className="mt-6 text-xl font-semibold">
@@ -107,9 +124,10 @@ export default function PrivacyPage() {
             </h2>
             <p className="mt-2 leading-7 text-gray-700">
                 Information processed through the website may be used to provide
-                movie recommendations, retrieve requested movie details, maintain
-                website security, troubleshoot errors, and keep the service
-                functioning. We do not sell visitors' personal information.
+                movie recommendations, retrieve requested movie details, understand
+                general site usage, maintain website security, troubleshoot errors,
+                and keep the service functioning. We do not sell visitors' personal
+                information.
             </p>
 
             <h2 className="mt-6 text-xl font-semibold">
@@ -117,10 +135,10 @@ export default function PrivacyPage() {
             </h2>
             <p className="mt-2 leading-7 text-gray-700">
                 We do not currently operate a visitor account system. Technical
-                information processed by hosting or third-party providers may be
-                retained for periods determined by those providers' policies,
-                operational needs, and applicable law. We take reasonable steps to
-                maintain the website, but no internet service can guarantee
+                information and analytics data processed by hosting or third-party
+                providers may be retained for periods determined by those providers'
+                policies, operational needs, and applicable law. We take reasonable
+                steps to maintain the website, but no internet service can guarantee
                 absolute security.
             </p>
 
