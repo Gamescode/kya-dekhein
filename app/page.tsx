@@ -1081,6 +1081,16 @@ export default function Home() {
           <p className="mt-1">
             Watch-provider availability is powered by JustWatch data.
           </p>
+
+          <nav
+            aria-label="Footer navigation"
+            className="mt-5 flex flex-wrap justify-center gap-x-5 gap-y-3 text-sm text-gray-500"
+          >
+            <a href="/about" className="hover:text-gray-900">About</a>
+            <a href="/contact" className="hover:text-gray-900">Contact</a>
+            <a href="/privacy" className="hover:text-gray-900">Privacy Policy</a>
+            <a href="/terms" className="hover:text-gray-900">Terms of Use</a>
+          </nav>
         </footer>
       </div>
     </main>
