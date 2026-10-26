@@ -12,23 +12,14 @@ async function fetchWithRetry(
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const response = await fetch(url, {
-        cache: "no-store",
-      });
-
-      return response;
+      return await fetch(url, { cache: "no-store" });
     } catch (error) {
       lastError = error;
-
       console.warn(
-        `TMDB request failed (attempt ${attempt + 1
-        }/${retries + 1}):`,
+        `TMDB request failed (attempt ${attempt + 1}/${retries + 1}):`,
         error
       );
-
-      if (attempt < retries) {
-        await sleep(delay);
-      }
+      if (attempt < retries) await sleep(delay);
     }
   }
 
@@ -46,46 +37,31 @@ export async function GET(request: Request) {
   }
 
   const { searchParams } = new URL(request.url);
-
   const movieId = searchParams.get("id");
   const genre = searchParams.get("genre");
   const language = searchParams.get("language");
   const minRuntime = searchParams.get("minRuntime");
   const maxRuntime = searchParams.get("maxRuntime");
-  const freeOnly =
-    searchParams.get("freeOnly") === "true";
+  const era = searchParams.get("era") ?? "any";
+  const freeOnly = searchParams.get("freeOnly") === "true";
 
   try {
-    /*
-     * ---------------------------------------------------------
-     * MOVIE DETAILS
-     * ---------------------------------------------------------
-     *
-     * Fetch movie details + India watch providers in one request.
-     */
+    // Movie details + India watch providers.
     if (movieId) {
       const movieEndpoint =
-        `https://api.themoviedb.org/3/movie/` +
-        `${encodeURIComponent(movieId)}` +
-        `?api_key=${apiKey}` +
-        `&language=en-IN` +
-        `&append_to_response=watch/providers`;
-
+        `https://api.themoviedb.org/3/movie/${encodeURIComponent(movieId)}` +
+        `?api_key=${apiKey}&language=en-IN&append_to_response=watch/providers`;
       const response = await fetchWithRetry(movieEndpoint);
 
       if (!response.ok) {
         return NextResponse.json(
-          {
-            error: "TMDB movie details request failed",
-          },
+          { error: "TMDB movie details request failed" },
           { status: response.status }
         );
       }
 
       const movie = await response.json();
-
-      const indiaProviders =
-        movie["watch/providers"]?.results?.IN ?? null;
+      const indiaProviders = movie["watch/providers"]?.results?.IN ?? null;
 
       return NextResponse.json({
         id: movie.id,
@@ -100,27 +76,9 @@ export async function GET(request: Request) {
           (genre: { id: number }) => genre.id
         ),
         posterPath: movie.poster_path,
-
-        /*
-         * This contains:
-         * - link
-         * - flatrate
-         * - free
-         * - ads
-         * - rent
-         * - buy
-         *
-         * for India.
-         */
         watchProviders: indiaProviders,
       });
     }
-
-    /*
-     * ---------------------------------------------------------
-     * MOVIE LIST
-     * ---------------------------------------------------------
-     */
 
     const params = new URLSearchParams({
       api_key: apiKey,
@@ -130,34 +88,25 @@ export async function GET(request: Request) {
       page: "1",
     });
 
-    if (language) {
-      params.set("with_original_language", language);
+    if (language) params.set("with_original_language", language);
+    if (genre) params.set("with_genres", genre);
+    if (minRuntime) params.set("with_runtime.gte", minRuntime);
+    if (maxRuntime) params.set("with_runtime.lte", maxRuntime);
+
+    // Apply release-year boundaries at TMDB Discover level.
+    if (era === "recent") {
+      params.set("primary_release_date.gte", "2020-01-01");
+    } else if (era === "2000s-2010s") {
+      params.set("primary_release_date.gte", "2000-01-01");
+      params.set("primary_release_date.lte", "2019-12-31");
+    } else if (era === "before-2000") {
+      params.set("primary_release_date.lte", "1999-12-31");
     }
 
-    if (genre) {
-      params.set("with_genres", genre);
-    }
-
-    if (minRuntime) {
-      params.set("with_runtime.gte", minRuntime);
-    }
-
-    if (maxRuntime) {
-      params.set("with_runtime.lte", maxRuntime);
-    }
-
-    /*
-     * When Free to watch is enabled:
-     *
-     * - restrict to India
-     * - only movies marked free OR ad-supported by TMDB
-     */
+    // In Free to watch mode, restrict availability to India.
     if (freeOnly) {
       params.set("watch_region", "IN");
-      params.set(
-        "with_watch_monetization_types",
-        "free|ads"
-      );
+      params.set("with_watch_monetization_types", "free|ads");
     }
 
     const hasDiscoverFilters =
@@ -165,18 +114,13 @@ export async function GET(request: Request) {
       Boolean(genre) ||
       Boolean(minRuntime) ||
       Boolean(maxRuntime) ||
+      era !== "any" ||
       freeOnly;
 
-    /*
-     * Fetch three pages in parallel.
-     *
-     * This keeps the existing performance improvement.
-     */
+    // Keep the existing three-page parallel fetch optimization.
     const pages = [1, 2, 3];
-
     const pageRequests = pages.map(async (page) => {
       const pageParams = new URLSearchParams(params);
-
       pageParams.set("page", String(page));
 
       const pageEndpoint = hasDiscoverFilters
@@ -189,39 +133,22 @@ export async function GET(request: Request) {
       );
 
       try {
-        const response =
-          await fetchWithRetry(pageEndpoint);
-
+        const response = await fetchWithRetry(pageEndpoint);
         if (!response.ok) {
-          console.warn(
-            `TMDB page ${page} request failed`
-          );
-
+          console.warn(`TMDB page ${page} request failed`);
           return [];
         }
 
         const data = await response.json();
-
-        if (Array.isArray(data.results)) {
-          return data.results;
-        }
-
-        return [];
+        return Array.isArray(data.results) ? data.results : [];
       } catch (error) {
-        console.warn(
-          `TMDB page ${page} failed:`,
-          error
-        );
-
+        console.warn(`TMDB page ${page} failed:`, error);
         return [];
       }
     });
 
-    const pageResults =
-      await Promise.all(pageRequests);
-
+    const pageResults = await Promise.all(pageRequests);
     const allResults = pageResults.flat();
-
     const movies = allResults.map((movie) => ({
       id: movie.id,
       title: movie.title,
@@ -233,25 +160,15 @@ export async function GET(request: Request) {
       posterPath: movie.poster_path,
     }));
 
-    return NextResponse.json({
-      count: movies.length,
-      movies,
-    });
+    return NextResponse.json({ count: movies.length, movies });
   } catch (error) {
-    console.error(
-      "TMDB API route error:",
-      error
-    );
-
+    console.error("TMDB API route error:", error);
     return NextResponse.json(
       {
         error: "TMDB request failed",
         details:
           error instanceof Error
-            ? `${error.message}${error.cause
-              ? ` — ${String(error.cause)}`
-              : ""
-            }`
+            ? `${error.message}${error.cause ? ` — ${String(error.cause)}` : ""}`
             : String(error),
       },
       { status: 500 }

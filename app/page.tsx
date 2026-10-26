@@ -29,6 +29,27 @@ const languages = [
   "Any",
 ];
 
+const eraOptions = [
+  { value: "recent", label: "Recent (2020+)" },
+  { value: "2000s-2010s", label: "2000s–2010s" },
+  { value: "before-2000", label: "Before 2000" },
+  { value: "any", label: "Any year" },
+];
+
+function matchesEra(releaseDate: string, era: string) {
+  // Unknown release dates are excluded unless the user selects Any year.
+  if (era === "any") return true;
+
+  const year = Number.parseInt(releaseDate?.slice(0, 4) ?? "", 10);
+  if (!Number.isFinite(year) || year < 1800) return false;
+
+  if (era === "recent") return year >= 2020;
+  if (era === "2000s-2010s") return year >= 2000 && year <= 2019;
+  if (era === "before-2000") return year < 2000;
+
+  return true;
+}
+
 function getMinutes(time: string) {
   return Number.parseInt(time, 10);
 }
@@ -238,6 +259,8 @@ export default function Home() {
   const [mood, setMood] = useState("");
   const [language, setLanguage] =
     useState("");
+  const [era, setEra] = useState("recent");
+  const [eraOpen, setEraOpen] = useState(false);
 
   const [freeOnly, setFreeOnly] =
     useState(false);
@@ -350,6 +373,12 @@ export default function Home() {
       }
 
       /*
+       * Movie era filter. The API applies this directly
+       * to TMDB Discover, and we verify it client-side too.
+       */
+      params.set("era", era);
+
+      /*
        * Horror uses TMDB's Horror genre.
        */
       if (
@@ -457,6 +486,16 @@ export default function Home() {
                     return null;
                   }
 
+                  const releaseDate =
+                    details.releaseDate ||
+                    details.release_date ||
+                    movie.release_date ||
+                    "";
+
+                  if (!matchesEra(releaseDate, era)) {
+                    return null;
+                  }
+
                   const genreIds =
                     details.genreIds ||
                     details.genre_ids ||
@@ -560,11 +599,7 @@ export default function Home() {
                       movie.overview ||
                       "No description available.",
 
-                    releaseDate:
-                      details.releaseDate ||
-                      details.release_date ||
-                      movie.release_date ||
-                      "",
+                    releaseDate,
 
                     genreIds,
 
@@ -763,6 +798,80 @@ export default function Home() {
                   {option}
                 </button>
               )
+            )}
+          </div>
+        </section>
+
+        {/* Movie era: custom selector styled to match the rest of the app */}
+        <section className="mb-8">
+          <h2 className="mb-3 text-xl font-semibold">Movie era</h2>
+          <div className="relative">
+            <button
+              id="movie-era"
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded={eraOpen}
+              aria-controls="movie-era-options"
+              onClick={() => setEraOpen((open) => !open)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") setEraOpen(false);
+              }}
+              className="flex w-full items-center justify-between rounded-2xl border border-gray-200 bg-white px-4 py-4 text-left text-sm font-medium text-gray-900 transition hover:border-gray-400 focus:border-black focus:outline-none"
+            >
+              <span>{eraOptions.find((option) => option.value === era)?.label ?? "Recent (2020+)"}</span>
+              <svg
+                aria-hidden="true"
+                className={`ml-3 h-5 w-5 shrink-0 transition-transform ${eraOpen ? "rotate-180" : ""}`}
+                viewBox="0 0 20 20"
+                fill="none"
+              >
+                <path d="m5 7.5 5 5 5-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+
+            {eraOpen && (
+              <div
+                id="movie-era-options"
+                role="listbox"
+                aria-label="Choose movie era"
+                className="absolute left-0 right-0 z-20 mt-2 overflow-hidden rounded-2xl border border-gray-200 bg-white p-2 shadow-xl"
+              >
+                {eraOptions.map((option) => {
+                  const selected = era === option.value;
+                  const descriptions: Record<string, string> = {
+                    recent: "Newer releases",
+                    "2000s-2010s": "Movies from 2000–2019",
+                    "before-2000": "Classic movies",
+                    any: "No release-year restriction",
+                  };
+
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      onClick={() => {
+                        setEra(option.value);
+                        setEraOpen(false);
+                      }}
+                      className={`flex w-full items-center justify-between rounded-xl px-3 py-3 text-left transition ${selected ? "bg-black text-white" : "text-gray-900 hover:bg-gray-100"}`}
+                    >
+                      <span className="min-w-0">
+                        <span className="block text-sm font-semibold">{option.label}</span>
+                        <span className={`mt-0.5 block text-xs ${selected ? "text-gray-300" : "text-gray-500"}`}>
+                          {descriptions[option.value]}
+                        </span>
+                      </span>
+                      {selected && (
+                        <svg aria-hidden="true" className="ml-3 h-5 w-5 shrink-0" viewBox="0 0 20 20" fill="none">
+                          <path d="m4.5 10 3.5 3.5 7.5-7.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             )}
           </div>
         </section>
