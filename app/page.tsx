@@ -189,18 +189,6 @@ function getRecommendations(
 }
 
 /*
- * Build a YouTube search rather than claiming a specific
- * video is the official/full movie.
- */
-function getYouTubeSearchUrl(title: string) {
-  const query = `${title} full movie`;
-
-  return `https://www.youtube.com/results?search_query=${encodeURIComponent(
-    query
-  )}`;
-}
-
-/*
  * Combine all free/ad-supported providers without duplicates.
  */
 function getFreeProviders(
@@ -213,33 +201,6 @@ function getFreeProviders(
   const providers = [
     ...(watchProviders.free ?? []),
     ...(watchProviders.ads ?? []),
-  ];
-
-  const unique = new Map<number, WatchProvider>();
-
-  for (const provider of providers) {
-    unique.set(
-      provider.provider_id,
-      provider
-    );
-  }
-
-  return Array.from(unique.values());
-}
-
-function getAllProviders(
-  watchProviders: WatchProviders | null
-): WatchProvider[] {
-  if (!watchProviders) {
-    return [];
-  }
-
-  const providers = [
-    ...(watchProviders.flatrate ?? []),
-    ...(watchProviders.free ?? []),
-    ...(watchProviders.ads ?? []),
-    ...(watchProviders.rent ?? []),
-    ...(watchProviders.buy ?? []),
   ];
 
   const unique = new Map<number, WatchProvider>();
@@ -685,25 +646,6 @@ export default function Home() {
       )
       : [];
 
-  const allProviders =
-    currentMovie
-      ? getAllProviders(
-        currentMovie.watchProviders
-      )
-      : [];
-
-  /*
-   * Is YouTube actually listed by TMDB
-   * as one of the providers?
-   */
-  const youtubeProvider =
-    freeProviders.find(
-      (provider) =>
-        provider.provider_name
-          .toLowerCase()
-          .includes("youtube")
-    );
-
   return (
     <main className="min-h-screen bg-white text-gray-900">
       <div className="mx-auto max-w-4xl px-6 py-12">
@@ -1049,106 +991,32 @@ export default function Home() {
                 )}
 
                 {/* Watch options */}
-                {(freeProviders.length > 0 ||
-                  allProviders.length > 0 ||
-                  currentMovie.watchProviders?.link) && (
-                    <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-4">
-                      <p className="font-semibold text-gray-900">
-                        Where can I watch?
-                      </p>
+                {currentMovie.watchProviders?.link && (
+                  <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-4">
+                    <p className="font-semibold text-gray-900">
+                      Where can I watch?
+                    </p>
 
-                      {freeProviders.length > 0 ? (
-                        <>
-                          <p className="mt-1 text-sm text-gray-500">
-                            Free or ad-supported options in India
-                          </p>
+                    <p className="mt-2 text-sm leading-6 text-gray-600">
+                      {freeOnly && freeProviders.length > 0
+                        ? "TMDB lists free or ad-supported availability for this movie in India. Check the current viewing options before watching."
+                        : "Check the current streaming, rental and purchase options for this movie in India."}
+                    </p>
 
-                          <div className="mt-4 flex flex-col gap-2">
-                            {freeProviders.map((provider) => {
-                              const isYouTube =
-                                provider.provider_name
-                                  .toLowerCase()
-                                  .includes("youtube");
+                    <a
+                      href={currentMovie.watchProviders.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-4 block rounded-xl border border-gray-200 px-4 py-3 text-center text-sm font-semibold text-gray-900 transition hover:border-gray-400 hover:bg-gray-50"
+                    >
+                      Check viewing options
+                    </a>
 
-                              const href = isYouTube
-                                ? getYouTubeSearchUrl(
-                                  currentMovie.title
-                                )
-                                : currentMovie.watchProviders?.link;
-
-                              if (!href) {
-                                return null;
-                              }
-
-                              return (
-                                <a
-                                  key={provider.provider_id}
-                                  href={href}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="rounded-xl border border-gray-200 px-4 py-3 text-sm font-semibold text-gray-900 transition hover:border-gray-400 hover:bg-gray-50"
-                                >
-                                  {isYouTube
-                                    ? `▶ Find ${currentMovie.title} on YouTube`
-                                    : `▶ Watch on ${provider.provider_name}`}
-                                </a>
-                              );
-                            })}
-                          </div>
-                        </>
-                      ) : allProviders.length > 0 ? (
-                        <>
-                          <p className="mt-1 text-sm text-gray-500">
-                            Available streaming and rental options in India
-                          </p>
-
-                          <div className="mt-4 flex flex-col gap-2">
-                            {allProviders.slice(0, 4).map((provider) => {
-                              const isYouTube =
-                                provider.provider_name
-                                  .toLowerCase()
-                                  .includes("youtube");
-
-                              const href = isYouTube
-                                ? getYouTubeSearchUrl(
-                                  currentMovie.title
-                                )
-                                : currentMovie.watchProviders?.link;
-
-                              if (!href) {
-                                return null;
-                              }
-
-                              return (
-                                <a
-                                  key={provider.provider_id}
-                                  href={href}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="rounded-xl border border-gray-200 px-4 py-3 text-sm font-semibold text-gray-900 transition hover:border-gray-400 hover:bg-gray-50"
-                                >
-                                  {isYouTube
-                                    ? `▶ Find ${currentMovie.title} on YouTube`
-                                    : `▶ Watch on ${provider.provider_name}`}
-                                </a>
-                              );
-                            })}
-                          </div>
-                        </>
-                      ) : null}
-
-                      {currentMovie.watchProviders?.link && (
-                        <a
-                          href={currentMovie.watchProviders.link}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mt-3 block text-center text-sm font-medium text-gray-600 underline underline-offset-2 hover:text-gray-900"
-                        >
-                          View all watch options
-                        </a>
-                      )}
-                    </div>
-                  )}
+                    <p className="mt-2 text-xs text-gray-500">
+                      Availability information provided through TMDB and JustWatch.
+                    </p>
+                  </div>
+                )}
 
                 {/* TMDB */}
                 <div className="mt-4 flex flex-col gap-3 sm:flex-row">
@@ -1180,6 +1048,62 @@ export default function Home() {
             </div>
           </div>
         )}
+
+        {/* About the recommendation experience */}
+        <section className="mt-14 space-y-8" aria-label="About Kya Dekhein">
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight text-gray-900">
+              Find a movie that fits your evening
+            </h2>
+            <p className="mt-3 leading-7 text-gray-600">
+              Kya Dekhein? helps narrow down movie choices using the time you
+              have, the mood you are in, your preferred language and the era
+              you want to explore. Choose your preferences and get a shortlist
+              instead of spending your evening browsing.
+            </p>
+          </div>
+
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">
+              How recommendations are selected
+            </h2>
+            <p className="mt-3 leading-7 text-gray-600">
+              The app retrieves movie information from TMDB and filters
+              candidates by runtime, original language, release period and
+              selected genre where applicable. It then ranks matching titles
+              using the selected mood, language match and TMDB rating. Mood
+              matching is based on genre categories, so it is a guide rather
+              than a guarantee of how every viewer will feel about a film.
+            </p>
+          </div>
+
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">
+              Understanding watch availability
+            </h2>
+            <p className="mt-3 leading-7 text-gray-600">
+              Watch-provider information is supplied through TMDB using
+              JustWatch data for India. Availability, subscription
+              requirements and catalogue listings can change. The viewing
+              options link opens the current listing so you can confirm
+              details with the provider before watching. Kya Dekhein? does not
+              host or distribute movies.
+            </p>
+          </div>
+
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">
+              Make your next choice
+            </h2>
+            <p className="mt-3 leading-7 text-gray-600">
+              Try a shorter runtime when you have limited time, choose a
+              different era to discover older releases, or switch languages
+              to explore films you might otherwise miss. Recommendations are
+              suggestions; you can use the movie details and availability
+              listing to decide what suits you.
+            </p>
+          </div>
+        </section>
 
         {/* Attribution */}
         <footer className="mt-12 border-t border-gray-100 pt-6 text-center text-xs text-gray-400">

@@ -18,7 +18,7 @@ export const metadata: Metadata = {
 
   title: "Kya Dekhein? — Find Your Next Movie",
   description:
-    "Not sure what to watch? Find a movie matching your mood, available time, and language.",
+    "Find a movie matching your mood, available time, language and preferred era. Kya Dekhein? helps you discover what to watch next.",
 
   alternates: {
     canonical: "/",
@@ -36,7 +36,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Kya Dekhein? — Find Your Next Movie",
     description:
-      "Not sure what to watch? Find a movie matching your mood, available time, and language.",
+      "Find a movie matching your mood, available time, language and preferred era.",
     url: "https://kya-dekhein.vercel.app/",
     siteName: "Kya Dekhein?",
     type: "website",
@@ -44,7 +44,11 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
     <html
       lang="en"
